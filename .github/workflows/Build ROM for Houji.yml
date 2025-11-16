@@ -1,19 +1,29 @@
-﻿name: Build ROM for Houji
+name: Build ROM for Sweet
+
 on:
   workflow_dispatch:
     inputs:
       URL:
         description: "Port package download URL"
         required: true
-        default: 'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS1.0.9.0.UNACNXM/miui_AURORA_OS1.0.9.0.UNACNXM_53b6a43c0e_14.0.zip'
-      VENDOR_URL:
-        description: "Base package download URL"
-        required: true
-        default: 'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS1.0.36.0.UNCCNXM/miui_HOUJI_OS1.0.36.0.UNCCNXM_54ab2de231_14.0.zip'
+        default: 'https://example.com/sweet_port.zip'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_WORKSPACE: ${{ github.workspace }}
+      device: sweet
+      build_time: ${{ github.run_number }}
+      build_utc: ${{ github.run_id }}
+      port_os_version: 14
+      vendor_os_version: 14
+      port_version: 1
+      vendor_version: 1
+      port_base_line: 100
+      vendor_base_line: 100
+      android_version: 14
+
     steps:
       - name: Maximize build environment
         uses: easimon/maximize-build-space@master
@@ -25,24 +35,29 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
 
-      - name: Check out repository files
-        uses: actions/checkout@main
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Build ROM
+      - name: Install dependencies
         run: |
-          sudo bash "$GITHUB_WORKSPACE"/make.sh ${{ github.event.inputs.URL }} ${{ github.event.inputs.VENDOR_URL }} $GITHUB_ENV $GITHUB_WORKSPACE
+          sudo apt-get update
+          sudo apt-get install -y unzip zip p7zip-full zstd cpio python3-pip
 
-      - name: Process ROM
+      - name: Run Sweet ROM build script
+        run: |
+          chmod +x "$GITHUB_WORKSPACE"/build_sweet_rom.sh
+          sudo bash "$GITHUB_WORKSPACE"/build_sweet_rom.sh ${{ github.event.inputs.URL }} $GITHUB_ENV $GITHUB_WORKSPACE
+
+      - name: Prepare GithubRelease directory
         run: |
           mkdir -p "$GITHUB_WORKSPACE"/GithubRelease
           cd "$GITHUB_WORKSPACE"/GithubRelease
           sudo split -b 1536M -d "$GITHUB_WORKSPACE"/zip/${{ env.rom_name }} ${{ env.rom_name }}
           cd "$GITHUB_WORKSPACE"
-          touch file.log
-          echo -e "Base package version: ${{ env.vendor_os_version }}\nBase package security patch version: ${{ env.vendor_security_patch }}\nBase package baseline version: ${{ env.vendor_base_line }}\n\nPort package version: ${{ env.port_os_version }}\nPort package security patch version: ${{ env.port_security_patch }}\nPort package baseline version: ${{ env.port_base_line }}" > file.log
+          echo -e "Port package version: ${{ env.port_os_version }}\nPort package baseline version: ${{ env.port_base_line }}" > file.log
 
       - name: Upload to Github Release
-        uses: ncipollo/release-action@main
+        uses: ncipollo/release-action@v1
         with:
           artifacts: ${{ github.workspace }}/GithubRelease/*
           name: ${{ env.port_os_version }}
@@ -52,12 +67,12 @@ jobs:
           artifactErrorsFailBuild: true
 
       - name: Upload to Oracle S3
-        if: github.repository == 'YuKongA/Build_houji_port_rom'
+        if: github.repository == 'YuKongA/Build_sweet_port_rom'
         run: |
           sudo -v ; curl https://rclone.org/install.sh | sudo bash
           mkdir -p ~/.config/rclone/
           echo ${{ secrets.confbase64 }} > base64.txt
           base64 --decode base64.txt > ~/.config/rclone/rclone.conf
-          rclone delete kr:/public-bucket/houji
-          rclone mkdir kr:/public-bucket/houji
-          rclone copy -P "$GITHUB_WORKSPACE"/zip/${{ env.rom_name }} kr:/public-bucket/houji
+          rclone delete kr:/public-bucket/sweet
+          rclone mkdir kr:/public-bucket/sweet
+          rclone copy -P "$GITHUB_WORKSPACE"/zip/${{ env.rom_name }} kr:/public-bucket/sweet
