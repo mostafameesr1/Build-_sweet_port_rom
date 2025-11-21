@@ -29,6 +29,16 @@ jobs:
           wget https://commondatastorage.googleapis.com/android-ci/clang/clang-r550000.tar.gz
           tar -xf clang-r550000.tar.gz
 
+      - name: Generate Kernel Version & String
+        id: gen_version
+        run: |
+          BUILD_DATE=$(date +'%Y%m%d')
+          RUN_NUM=${GITHUB_RUN_NUMBER}
+          KERNEL_STRING="Sweet Kernel Build #${RUN_NUM}"
+          KERNEL_VERSION="${BUILD_DATE}.${RUN_NUM}"
+          echo "KERNEL_STRING=$KERNEL_STRING" >> $GITHUB_OUTPUT
+          echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+
       - name: Build Kernel for Sweet
         run: |
           export PATH=~/clang/bin:$PATH
@@ -56,9 +66,9 @@ is_slot_device=1;
 ramdisk_compression=auto;
 EOF
 
-          cat > AnyKernel3/properties.sh << 'EOF'
-kernel.string=Custom Kernel for Xiaomi Sweet
-kernel.version=1.0
+          cat > AnyKernel3/properties.sh << EOF
+kernel.string=${{ steps.gen_version.outputs.KERNEL_STRING }}
+kernel.version=${{ steps.gen_version.outputs.KERNEL_VERSION }}
 device.name1=sweet
 EOF
 
