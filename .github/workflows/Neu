@@ -1,0 +1,117 @@
+name: Build Kernel (Sweet Full)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        root_type: [kernelsu, sukisu, apatch] # 3 إصدارات
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison flex clang libc6-dev libssl-dev gcc g++ make lld llvm wget git ccache python3 \
+          libncurses5-dev libncursesw5-dev zip unzip gzip lz4
+
+      - name: Setup Latest Clang (r550000)
+        run: |
+          mkdir -p ~/clang
+          cd ~/clang
+          wget https://commondatastorage.googleapis.com/android-ci/clang/clang-r550000.tar.gz
+          tar -xf clang-r550000.tar.gz
+
+      - name: Build Kernel for Sweet
+        run: |
+          export PATH=~/clang/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJDUMP=llvm-objdump
+          export STRIP=llvm-strip
+          export KCFLAGS="-flto=thin"
+          export KAFLAGS="-flto=thin"
+
+          make sweet_defconfig
+          make -j$(nproc)
+
+      - name: Prepare AnyKernel3 Folder
+        run: |
+          mkdir -p AnyKernel3
+          cat > AnyKernel3/anykernel.sh << 'EOF'
+#!/bin/sh
+block=/dev/block/bootdevice/by-name/boot;
+is_slot_device=1;
+ramdisk_compression=auto;
+EOF
+
+          cat > AnyKernel3/properties.sh << 'EOF'
+kernel.string=Custom Kernel for Xiaomi Sweet
+kernel.version=1.0
+device.name1=sweet
+EOF
+
+          cp arch/arm64/boot/Image.gz-dtb AnyKernel3/
+
+      - name: Integrate Root Type + SuSFS
+        run: |
+          # تحميل أحدث SuSFS Module
+          echo "Downloading latest SuSFS Module..."
+          curl -Ls https://github.com/sidex15/susfs4ksu-module/releases/latest/download/susfs.zip -o AnyKernel3/susfs.zip
+          unzip -o AnyKernel3/susfs.zip -d AnyKernel3/susfs
+
+          # إضافة Root حسب النوع
+          if [ "${{ matrix.root_type }}" == "kernelsu" ]; then
+            echo "Adding KernelSU-Next..."
+            curl -Ls https://github.com/KernelSU-Next/KernelSU-Next/releases/latest/download/KernelSU-Next.zip -o AnyKernel3/kernelsu.zip
+          elif [ "${{ matrix.root_type }}" == "sukisu" ]; then
+            echo "Adding SukiSU-Ultra..."
+            curl -Ls https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/latest/download/SukiSU-Ultra.zip -o AnyKernel3/suksu.zip
+          elif [ "${{ matrix.root_type }}" == "apatch" ]; then
+            echo "Adding APatch..."
+            curl -Ls https://github.com/bmax121/APatch/releases/latest/download/APatch.zip -o AnyKernel3/apatch.zip
+          fi
+
+      - name: Create Flashable ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../sweet-kernel-${{ matrix.root_type }}.zip ./*
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweet-kernel-${{ matrix.root_type }}-artifacts
+          path: |
+            arch/arm64/boot/Image.gz-dtb
+            sweet-kernel-${{ matrix.root_type }}.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sweet-kernel-${{ matrix.root_type }}-${{ github.run_number }}
+          name: Sweet Kernel Build (${{ matrix.root_type }}) #${{ github.run_number }}
+          body: |
+            Automatic kernel build for Xiaomi Sweet (SM6150)
+            • Toolchain: Clang r550000
+            • Root: ${{ matrix.root_type }}
+            • LTO: ThinLTO enabled
+            • Includes: latest SuSFS Module
+            • Outputs:
+              - Image.gz-dtb
+              - AnyKernel3 flashable ZIP
+          files: |
+            arch/arm64/boot/Image.gz-dtb
+            sweet-kernel-${{ matrix.root_type }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
